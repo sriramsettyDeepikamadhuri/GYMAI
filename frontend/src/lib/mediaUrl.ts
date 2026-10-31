@@ -1,5 +1,19 @@
 /** Origin of the GymAI backend (the same server that answers /api), used for files it serves such as /media/... */
-export const BACKEND_ORIGIN = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000/api').replace(/\/api\/?$/, '')
+export function getBackendOrigin(): string {
+  const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
+
+  if (configured) {
+    return configured.replace(/\/api\/?$/, '')
+  }
+
+  if (import.meta.env.PROD) {
+    throw new Error('VITE_API_URL is required in production. Set it to the deployed backend URL.')
+  }
+
+  return 'http://localhost:8000'
+}
+
+export const BACKEND_ORIGIN = getBackendOrigin()
 
 /** Guide illustration the backend serves for every exercise. */
 export const guideArtUrl = (slug: string) => `${BACKEND_ORIGIN}/media/exercises/${slug}.svg`

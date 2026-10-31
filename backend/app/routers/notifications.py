@@ -48,5 +48,5 @@ def mark_read(payload:schemas.MarkReadIn,user:models.User=Depends(get_current_us
 def create_event(payload:schemas.EventCreateIn,db:Session=Depends(get_db)):
     note,recipients=publish_event(db,title=payload.title,message_text=payload.message_text,country=payload.country,state=payload.state,area=payload.area,target_url=payload.target_url)
     failed=email_recipients(note.notification_id,recipients)
-    if recipients and failed:raise HTTPException(status_code=503,detail=f'Marathon saved, but {len(failed)} event email(s) could not be sent. Check SMTP settings.')
+    if recipients and failed:raise HTTPException(status_code=503,detail=f'Marathon saved, but {len(failed)} event email(s) could not be sent. Please try again later.')
     return {'notification_id':note.notification_id,'emails_sent':len(recipients)}

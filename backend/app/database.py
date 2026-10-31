@@ -13,9 +13,21 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("GYMAI_DATA_DIR", str(Path.home() / ".gymai")))
 
 
+def _normalize_postgres_url(url: str) -> str:
+    """Normalize PostgreSQL URLs to SQLAlchemy's psycopg2 driver while preserving Neon SSL settings."""
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg2://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+
 def _resolve_url(url: str) -> str:
     """Relative SQLite paths (sqlite:///./gymai.db) are stored in DATA_DIR. An existing backend/gymai.db is
     copied there once. Absolute SQLite paths and PostgreSQL URLs are used exactly as given."""
+    if settings.is_production:
+        return _normalize_postgres_url(url)
+
     prefix = "sqlite:///"
     if url.startswith(prefix) and not url.startswith("sqlite:////") and url != "sqlite://":
         raw = url[len(prefix):]
@@ -29,16 +41,28 @@ def _resolve_url(url: str) -> str:
                 return prefix + str(target)
             except OSError:
                 return prefix + str(legacy)  # data folder not writable (some hosts): keep it beside the code
-    return url
+    return _normalize_postgres_url(url)
 
 
 DATABASE_URL = _resolve_url(settings.database_url)
 
-# SQLite needs this connect_arg for multi-threaded FastAPI use; Postgres ignores it
-# entirely if you swap the URL, so this stays safe across both backends.
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+# SQLite needs this connect_arg for multi-threaded FastAPI use; Postgres uses a small pool with SSL mode enabled.
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+elif "sslmode=" not in DATABASE_URL:
+    connect_args = {"sslmode": "require"}
+else:
+    connect_args = {}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_timeout=20,
+    pool_size=5,
+    max_overflow=10,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

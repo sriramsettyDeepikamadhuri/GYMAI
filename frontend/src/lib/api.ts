@@ -1,6 +1,31 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+const LOCAL_API_URL = 'http://localhost:8000/api'
+
+export function normalizeApiBaseUrl(value: string): string {
+  const trimmed = (value ?? '').trim().replace(/\/+$/, '')
+  if (!trimmed) {
+    return ''
+  }
+
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`
+}
+
+export function getApiBaseUrl(): string {
+  const configured = normalizeApiBaseUrl(import.meta.env.VITE_API_URL ?? '')
+
+  if (configured) {
+    return configured
+  }
+
+  if (import.meta.env.PROD) {
+    throw new Error('VITE_API_URL is required in production. Set it to the deployed backend URL.')
+  }
+
+  return LOCAL_API_URL
+}
+
+const API_URL = getApiBaseUrl()
 
 export const api = axios.create({
   baseURL: API_URL,

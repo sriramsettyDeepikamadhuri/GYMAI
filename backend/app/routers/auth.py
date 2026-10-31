@@ -97,7 +97,7 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
         db.commit()
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="We could not send the verification email. Check SMTP configuration and try again.") from exc
+        raise HTTPException(status_code=503, detail="We could not send the verification email. Please try again later.") from exc
     return {"detail": "Verification code sent. Check your email.", "email": email}
 
 

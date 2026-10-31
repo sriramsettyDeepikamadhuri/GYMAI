@@ -1,13 +1,15 @@
 import asyncio
+import urllib.parse
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
+import secrets
 
-from app.config import settings
+from app.config import settings, validate_runtime_settings, validate_database_url_for_runtime
 from app.database import Base, engine
 
 from app import models
@@ -26,6 +28,9 @@ from app.routers import (
     admin,
 )
 
+
+validate_runtime_settings()
+validate_database_url_for_runtime()
 
 Base.metadata.create_all(
     bind=engine,
@@ -90,7 +95,23 @@ with SessionLocal() as _seed_db:
 from app.services.reminders import reminder_loop
 from app.database import DATABASE_URL
 
-print(f"[GymAI] build 2026-10-18-b | Using database: {DATABASE_URL}")  # CHANGE: shows exactly which file holds your accounts
+
+def _safe_database_label(database_url: str) -> str:
+    if not database_url:
+        return "database URL not configured"
+    if database_url.startswith("sqlite"):
+        return "SQLite database"
+    try:
+        parsed = urllib.parse.urlsplit(database_url)
+    except ValueError:
+        return "PostgreSQL database (credentials hidden)"
+    scheme = parsed.scheme or "postgresql"
+    hostname = parsed.hostname or "unknown-host"
+    db_name = parsed.path.lstrip("/") or "database"
+    return f"{scheme} database at {hostname}/{db_name} (credentials hidden)"
+
+
+print(f"[GymAI] build 2026-10-18-b | Using database: {_safe_database_label(DATABASE_URL)}")
 
 
 @asynccontextmanager
@@ -101,8 +122,7 @@ async def lifespan(_app: FastAPI):
             print(f"[GymAI] users: {db.query(models.User).count()}, saved workouts: {db.query(models.WorkoutSession).count()}")
     except Exception as exc:  # never block startup
         print(f"[GymAI] could not read database summary: {exc}")
-    # CHANGE 4: start the nightly incomplete-workout reminder
-    task = asyncio.create_task(reminder_loop()) if settings.reminder_enabled else None
+    task = asyncio.create_task(reminder_loop()) if settings.reminder_enabled and not settings.is_production else None
     try:
         yield
     finally:
@@ -115,6 +135,17 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+@app.post("/api/internal/reminders/run")
+def trigger_reminders(x_scheduler_key: str | None = Header(default=None, alias="X-Scheduler-Key")):
+    if not settings.scheduler_api_key:
+        raise HTTPException(status_code=503, detail="Scheduler is not configured.")
+    if not x_scheduler_key or not secrets.compare_digest(x_scheduler_key, settings.scheduler_api_key):
+        raise HTTPException(status_code=403, detail="Invalid scheduler key.")
+    from app.services.reminders import send_incomplete_reminders
+
+    sent = send_incomplete_reminders()
+    return {"status": "ok", "sent": sent}
 
 
 app.add_middleware(
